@@ -1,418 +1,478 @@
-import os
+"""
+Cinema-Grade Expanding Accordion Card Slider with Native PowerPoint Morph Transitions.
+Fully automated, CI/CD-compatible generation script.
+"""
+
 import math
+import os
+import struct
+import wave
+from pathlib import Path
+from PIL import Image, ImageDraw
+
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.oxml import parse_xml
-from PIL import Image, ImageDraw, ImageFont
+from pptx.oxml.ns import nsdecls, qn
 
-# -----------------------------------------------------------------------------
-# 1. إعداد المسارات والمجلدات
-# -----------------------------------------------------------------------------
-OUTPUT_DIR = "output"
-IMAGES_DIR = "images"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(IMAGES_DIR, exist_ok=True)
+# ==============================================================================
+# CONFIGURATION & DESIGN SYSTEM CONSTANTS
+# ==============================================================================
 
-IMG_HIBISCUS = os.path.join(IMAGES_DIR, "hibiscus.png")
-IMG_LILY = os.path.join(IMAGES_DIR, "lily.png")
-IMG_PEONY = os.path.join(IMAGES_DIR, "peony.png")
+SLIDE_WIDTH = 13.333
+SLIDE_HEIGHT = 7.500
 
-# -----------------------------------------------------------------------------
-# 2. توليد صور افتراضية عالية الدقة في حال لم يضع المستخدم صوره بعد
-# -----------------------------------------------------------------------------
-def ensure_images():
-    if not os.path.exists(IMG_HIBISCUS):
-        img = Image.new("RGBA", (600, 600), (255, 255, 255, 0))
-        d = ImageDraw.Draw(img)
-        d.ellipse([50, 50, 550, 550], fill=(255, 210, 60, 255))
-        d.ellipse([220, 220, 380, 380], fill=(180, 40, 20, 255))
-        img.save(IMG_HIBISCUS)
-        
-    if not os.path.exists(IMG_LILY):
-        img = Image.new("RGBA", (600, 600), (255, 255, 255, 0))
-        d = ImageDraw.Draw(img)
-        d.ellipse([70, 70, 530, 530], fill=(245, 140, 175, 255))
-        d.ellipse([250, 250, 350, 350], fill=(255, 255, 200, 255))
-        img.save(IMG_LILY)
+BASE_DIR = Path(__file__).resolve().parent
+IMAGES_DIR = BASE_DIR / "images"
+OUTPUT_DIR = BASE_DIR / "output"
+SOUNDS_DIR = OUTPUT_DIR / "sounds"
 
-    if not os.path.exists(IMG_PEONY):
-        img = Image.new("RGBA", (600, 600), (255, 255, 255, 0))
-        d = ImageDraw.Draw(img)
-        d.ellipse([60, 60, 540, 540], fill=(70, 130, 180, 255))
-        d.ellipse([230, 230, 370, 370], fill=(30, 60, 100, 255))
-        img.save(IMG_PEONY)
+CARD_DATA = [
+    {
+        "id": 1,
+        "key": "card_1",
+        "name_en": "Yellow Hibiscus",
+        "name_ar": "الكركديه الأصفر",
+        "num": "1",
+        "bg_rgb": RGBColor(253, 244, 227),     # #FDF4E3
+        "accent_rgb": RGBColor(218, 120, 23),   # #DA7817
+        "text_rgb": RGBColor(90, 65, 40),       # #5A4128
+        "image_file": "hibiscus.png",
+        "fallback_color": (245, 185, 30, 255),
+        "para_1": "رمز للإشراق والبهجة والجمال الاستوائي، تمنح الأجواء طاقة إيجابية وحيوية متجددة",
+        "para_2": "تتميز ببتلاتها المتوهجة للشمس، وتعد خياراً مثالياً للاحتفاء بالبدايات السعيدة ولحظات الفرح",
+    },
+    {
+        "id": 2,
+        "key": "card_2",
+        "name_en": "Pink Lily",
+        "name_ar": "الزنبق الوردي",
+        "num": "2",
+        "bg_rgb": RGBColor(252, 228, 236),     # #FCE4EC
+        "accent_rgb": RGBColor(216, 67, 108),   # #D8436C
+        "text_rgb": RGBColor(95, 45, 65),       # #5F2D41
+        "image_file": "lily.png",
+        "fallback_color": (235, 110, 145, 255),
+        "para_1": "أيقونة الأناقة والنعومة والجمال الهادئ، وتُعبر عن المشاعر الصادقة والمودة الخالصة",
+        "para_2": "بحضورها الملكي وعطرها الرقيق، تضفي لمسة ساحرة تلائم أرقى مناسبات التهنئة والمحبة",
+    },
+    {
+        "id": 3,
+        "key": "card_3",
+        "name_en": "Blue Peony",
+        "name_ar": "الفاوانيا الزرقاء",
+        "num": "3",
+        "bg_rgb": RGBColor(227, 238, 246),     # #E3EEF6
+        "accent_rgb": RGBColor(35, 78, 112),    # #234E70
+        "text_rgb": RGBColor(40, 60, 80),       # #283C50
+        "image_file": "peony.png",
+        "fallback_color": (55, 120, 180, 255),
+        "para_1": "زهرة نادرة تجسد معاني السكينة والعمق والثقة، وتلفت الأنظار بندرتها وسحرها الفريد",
+        "para_2": "تأسر القلوب بتموجات بتلاتها المخملية العميقة لتعكس فخامة عصرية لا مثيل لها",
+    },
+]
 
-ensure_images()
+# ==============================================================================
+# PROCEDURAL AUDIO SYNTHESIS
+# ==============================================================================
 
-# -----------------------------------------------------------------------------
-# 3. الألوان المحددة لكل بطاقة (مطابقة للمقطع)
-# -----------------------------------------------------------------------------
-COLOR_BG_1 = RGBColor(253, 244, 227)   # الكركديه (أصفر دافئ)
-COLOR_BG_2 = RGBColor(252, 228, 236)   # الزنبق (وردي باستيل)
-COLOR_BG_3 = RGBColor(227, 238, 246)   # الفاوانيا (أزرق هادئ)
+def generate_audio_effects():
+    """Synthesizes high-fidelity 44.1 kHz WAV audio files without external assets."""
+    SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+    sample_rate = 44100
 
-ACCENT_1 = RGBColor(218, 120, 23)
-ACCENT_2 = RGBColor(216, 67, 108)
-ACCENT_3 = RGBColor(35, 78, 112)
+    # 1. Soft Breeze Transition (1.20 seconds filtered multi-tone swoosh)
+    breeze_path = SOUNDS_DIR / "soft_breeze_transition.wav"
+    duration_breeze = 1.20
+    total_samples_breeze = int(sample_rate * duration_breeze)
+    with wave.open(str(breeze_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        frames = bytearray()
+        for i in range(total_samples_breeze):
+            t = i / sample_rate
+            # Dynamic envelope: smooth bell curve
+            envelope = math.sin(math.pi * (t / duration_breeze)) ** 2
+            # Frequency modulation sweeps upward then resolves
+            freq = 240.0 + 180.0 * math.sin(math.pi * (t / duration_breeze))
+            freq_sub = 120.0 + 80.0 * math.sin(math.pi * (t / duration_breeze))
+            sample = (
+                0.60 * math.sin(2.0 * math.pi * freq * t)
+                + 0.30 * math.sin(2.0 * math.pi * freq_sub * t)
+                + 0.10 * math.sin(2.0 * math.pi * (freq * 2.2) * t)
+            )
+            val = int(sample * envelope * 24000.0)
+            val = max(-32767, min(32767, val))
+            frames.extend(struct.pack("<h", val))
+        wav.writeframes(frames)
 
-TEXT_1 = RGBColor(90, 65, 40)
-TEXT_2 = RGBColor(95, 45, 65)
-TEXT_3 = RGBColor(40, 60, 80)
+    # 2. Floral Ambient Chime (1.80 seconds crystalline harmonic decay)
+    chime_path = SOUNDS_DIR / "floral_ambient_chime.wav"
+    duration_chime = 1.80
+    total_samples_chime = int(sample_rate * duration_chime)
+    with wave.open(str(chime_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        frames = bytearray()
+        partials = [(523.25, 0.40), (659.25, 0.30), (783.99, 0.20), (1046.50, 0.10)]
+        for i in range(total_samples_chime):
+            t = i / sample_rate
+            decay = math.exp(-3.2 * t)
+            sample = sum(amp * math.sin(2.0 * math.pi * freq * t) for freq, amp in partials)
+            val = int(sample * decay * 28000.0)
+            val = max(-32767, min(32767, val))
+            frames.extend(struct.pack("<h", val))
+        wav.writeframes(frames)
 
-# -----------------------------------------------------------------------------
-# 4. بناء ملف PowerPoint مع وسم الـ Morph المتقدم
-# -----------------------------------------------------------------------------
-prs = Presentation()
-prs.slide_width = Inches(13.333)
-prs.slide_height = Inches(7.5)
-blank_layout = prs.slide_layouts[6]
+# ==============================================================================
+# FALLBACK BOTANICAL GRAPHIC GENERATION
+# ==============================================================================
 
-def apply_precise_morph(slide, duration_ms=1250):
-    # استخدام وسم الـ Morph الخاص بمايكروسوفت مع تحديد المدة بدقة
-    xml = f"""
-    <p:transition xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
-                  xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" 
-                  spd="med" advClick="1">
-      <p14:morph option="byObject"/>
-    </p:transition>
+def generate_fallback_botanical_image(filepath: Path, color_rgba: tuple):
+    """Draws a high-res, transparent alpha-channel botanical emblem using Pillow."""
+    size = (1000, 1000)
+    img = Image.new("RGBA", size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    cx, cy = 500, 500
+
+    # Draw a rosette of 8 petals
+    num_petals = 8
+    petal_len = 320
+    petal_wid = 140
+    for idx in range(num_petals):
+        angle = idx * (2 * math.pi / num_petals)
+        px = cx + int(math.cos(angle) * (petal_len * 0.55))
+        py = cy + int(math.sin(angle) * (petal_len * 0.55))
+        box = [px - petal_wid, py - petal_wid, px + petal_wid, py + petal_wid]
+        draw.ellipse(box, fill=color_rgba)
+
+    # Core center disk
+    core_radius = 110
+    core_color = (255, 255, 255, 240)
+    draw.ellipse(
+        [cx - core_radius, cy - core_radius, cx + core_radius, cy + core_radius],
+        fill=core_color,
+    )
+    # Inner pistil details
+    inner_rad = 60
+    draw.ellipse(
+        [cx - inner_rad, cy - inner_rad, cx + inner_rad, cy + inner_rad],
+        fill=color_rgba,
+    )
+
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    img.save(filepath, format="PNG")
+
+def verify_or_create_assets():
+    """Ensures botanical transparent assets exist before PPTX assembly."""
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    for card in CARD_DATA:
+        img_path = IMAGES_DIR / card["image_file"]
+        if not img_path.exists():
+            generate_fallback_botanical_image(img_path, card["fallback_color"])
+
+# ==============================================================================
+# NATIVE PPTX MORPH & RTL XML UTILITIES
+# ==============================================================================
+
+def assign_morph_identifier(shape, morph_name: str):
+    """Enforces PPTX morph pairing by setting the shape name with the '!!' prefix."""
+    shape.name = morph_name
+
+def inject_native_morph_transition(slide):
+    """Injects native PowerPoint Morph transition and Breeze sound into slide XML."""
+    transition_xml = (
+        '<p:transition xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" '
+        'spd="med" advClick="1">\n'
+        '  <p14:morph option="byObject"/>\n'
+        '  <p:sndAc>\n'
+        '    <p:stSnd>\n'
+        '      <p:snd name="Breeze"/>\n'
+        '    </p:stSnd>\n'
+        '  </p:sndAc>\n'
+        '</p:transition>'
+    )
+    slide_elem = slide._element
+
+    # Replace existing p:transition if present, otherwise insert before p:extLst
+    for child in list(slide_elem):
+        if child.tag.endswith("transition"):
+            slide_elem.remove(child)
+
+    trans_elem = parse_xml(transition_xml)
+    extLst = slide_elem.find(qn("p:extLst"))
+    if extLst is not None:
+        slide_elem.insert(slide_elem.index(extLst), trans_elem)
+    else:
+        slide_elem.append(trans_elem)
+
+def set_paragraph_rtl(paragraph):
+    """Configures paragraph text properties to strict Right-to-Left (RTL)."""
+    pPr = paragraph._element.get_or_add_pPr()
+    pPr.set("rtl", "1")
+    paragraph.alignment = PP_ALIGN.RIGHT
+
+# ==============================================================================
+# SLIDE BUILDER ENGINE
+# ==============================================================================
+
+def compute_layout(active_index: int):
     """
-    slide._element.append(parse_xml(xml))
+    Computes precise bounding coordinates for State 0, 1, 2, and 3.
+    active_index:
+       0 -> Overview (State 0: balanced columns)
+       1 -> Card 1 Hero (State 1)
+       2 -> Card 2 Hero (State 2)
+       3 -> Card 3 Hero (State 3)
+    """
+    layout = {}
+    if active_index == 0:
+        # State 0: 3 Balanced Cards
+        widths = [4.444, 4.444, 4.445]
+        xs = [0.000, 4.444, 8.888]
+        for i in range(3):
+            layout[i + 1] = {
+                "card_x": xs[i],
+                "card_w": widths[i],
+                "is_hero": False,
+                "img_x": xs[i] + (widths[i] - 2.40) / 2.0,
+                "img_y": 1.40,
+                "img_size": 2.40,
+                "num_x": xs[i] + 0.35,
+                "num_y": 4.05,
+                "num_w": widths[i] - 0.70,
+                "num_size": 96,
+                "num_align": PP_ALIGN.CENTER,
+                "title_x": xs[i] + 0.35,
+                "title_y": 5.45,
+                "title_w": widths[i] - 0.70,
+                "title_align": PP_ALIGN.CENTER,
+            }
+    else:
+        # Hero Accordion States
+        hero_id = active_index
+        cur_x = 0.000
+        for cid in range(1, 4):
+            if cid == hero_id:
+                w = 9.133
+                layout[cid] = {
+                    "card_x": cur_x,
+                    "card_w": w,
+                    "is_hero": True,
+                    "img_x": cur_x + 0.50,
+                    "img_y": 1.25,
+                    "img_size": 4.70,
+                    "num_x": cur_x + 5.30,
+                    "num_y": 0.55,
+                    "num_w": 3.40,
+                    "num_size": 110,
+                    "num_align": PP_ALIGN.RIGHT,
+                    "title_x": cur_x + 5.30,
+                    "title_y": 2.35,
+                    "title_w": 3.40,
+                    "title_align": PP_ALIGN.RIGHT,
+                    "body_x": cur_x + 5.30,
+                    "body_y": 3.75,
+                    "body_w": 3.40,
+                }
+            else:
+                w = 2.100
+                layout[cid] = {
+                    "card_x": cur_x,
+                    "card_w": w,
+                    "is_hero": False,
+                    "img_x": cur_x + (w - 1.50) / 2.0,
+                    "img_y": 1.40,
+                    "img_size": 1.50,
+                    "num_x": cur_x + 0.15,
+                    "num_y": 3.40,
+                    "num_w": w - 0.30,
+                    "num_size": 72,
+                    "num_align": PP_ALIGN.CENTER,
+                    "title_x": cur_x + 0.15,
+                    "title_y": 4.80,
+                    "title_w": w - 0.30,
+                    "title_align": PP_ALIGN.CENTER,
+                }
+            cur_x += w
+    return layout
 
-def create_powerpoint_slide(state_index):
+def render_slide(prs, blank_layout, state_id: int):
+    """Renders an individual keyframe slide with consistent Morph naming."""
     slide = prs.slides.add_slide(blank_layout)
-    apply_precise_morph(slide)
+    inject_native_morph_transition(slide)
+    layout = compute_layout(state_id)
 
-    # حسابات الحالات (State Definition)
-    # الحالة 0: وضع التساوي
-    # الحالة 1: توسيع البطاقة الأولى
-    # الحالة 2: توسيع البطاقة الثانية
-    # الحالة 3: توسيع البطاقة الثالثة
-    if state_index == 0:
-        w = [Inches(4.444), Inches(4.444), Inches(4.445)]
-        x = [Inches(0.0), Inches(4.444), Inches(8.888)]
-    elif state_index == 1:
-        w = [Inches(9.133), Inches(2.100), Inches(2.100)]
-        x = [Inches(0.0), Inches(9.133), Inches(11.233)]
-    elif state_index == 2:
-        w = [Inches(2.100), Inches(9.133), Inches(2.100)]
-        x = [Inches(0.0), Inches(2.100), Inches(11.233)]
-    elif state_index == 3:
-        w = [Inches(2.100), Inches(2.100), Inches(9.133)]
-        x = [Inches(0.0), Inches(2.100), Inches(4.200)]
+    # 1. Base Card Shapes
+    for card in CARD_DATA:
+        cid = card["id"]
+        geo = layout[cid]
 
-    # رسم المستطيلات الأساسية مع أسماء الـ Morph الثابتة (!!)
-    bg1 = slide.shapes.add_shape(1, x[0], Inches(0), w[0], Inches(7.5))
-    bg1.name = "!!card_1"
-    bg1.fill.solid()
-    bg1.fill.fore_color.rgb = COLOR_BG_1
-    bg1.line.fill.background()
+        rect = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(geo["card_x"]),
+            Inches(0.0),
+            Inches(geo["card_w"]),
+            Inches(SLIDE_HEIGHT),
+        )
+        assign_morph_identifier(rect, f"!!card_{cid}")
+        rect.fill.solid()
+        rect.fill.fore_color.rgb = card["bg_rgb"]
+        rect.line.fill.background()  # No border
 
-    bg2 = slide.shapes.add_shape(1, x[1], Inches(0), w[1], Inches(7.5))
-    bg2.name = "!!card_2"
-    bg2.fill.solid()
-    bg2.fill.fore_color.rgb = COLOR_BG_2
-    bg2.line.fill.background()
+    # 2. Flower Botanical Images
+    for card in CARD_DATA:
+        cid = card["id"]
+        geo = layout[cid]
+        img_path = IMAGES_DIR / card["image_file"]
 
-    bg3 = slide.shapes.add_shape(1, x[2], Inches(0), w[2], Inches(7.5))
-    bg3.name = "!!card_3"
-    bg3.fill.solid()
-    bg3.fill.fore_color.rgb = COLOR_BG_3
-    bg3.line.fill.background()
+        pic = slide.shapes.add_picture(
+            str(img_path),
+            Inches(geo["img_x"]),
+            Inches(geo["img_y"]),
+            width=Inches(geo["img_size"]),
+            height=Inches(geo["img_size"]),
+        )
+        assign_morph_identifier(pic, f"!!flower_{cid}")
 
-    # إضافة العناصر لكل بطاقة حسب حالتها
-    # --- بطاقة 1 ---
-    if state_index == 1:
-        f1 = slide.shapes.add_picture(IMG_HIBISCUS, Inches(0.4), Inches(1.2), Inches(4.7), Inches(4.7))
-        f1.name = "!!flower_1"
-        
-        num1 = slide.shapes.add_textbox(Inches(5.0), Inches(0.8), Inches(3.5), Inches(1.8))
-        num1.name = "!!num_1"
-        p = num1.text_frame.paragraphs[0]
-        p.text = "1"
-        p.font.name = "Segoe UI"
-        p.font.size = Pt(110)
-        p.font.bold = True
-        p.font.color.rgb = ACCENT_1
+    # 3. Numeric Indicators
+    for card in CARD_DATA:
+        cid = card["id"]
+        geo = layout[cid]
 
-        t1 = slide.shapes.add_textbox(Inches(4.7), Inches(2.8), Inches(4.2), Inches(3.6))
-        t1.name = "!!text_1"
-        tf = t1.text_frame
+        tb = slide.shapes.add_textbox(
+            Inches(geo["num_x"]),
+            Inches(geo["num_y"]),
+            Inches(geo["num_w"]),
+            Inches(1.50),
+        )
+        assign_morph_identifier(tb, f"!!num_{cid}")
+        tf = tb.text_frame
         tf.word_wrap = True
-        p1 = tf.paragraphs[0]
-        p1.text = "رمز للإشراق والبهجة والجمال الاستوائي، تمنح الأجواء طاقة إيجابية وحيوية متجددة."
-        p1.font.name = "Calibri"
-        p1.font.size = Pt(18)
-        p1.font.color.rgb = TEXT_1
-        p1.alignment = PP_ALIGN.RIGHT
-        p1.space_after = Pt(18)
-        p2 = tf.add_paragraph()
-        p2.text = "تتميز ببتلاتها المتوهجة للشمس، وتعد خياراً مثالياً للاحتفاء بالبدايات السعيدة ولحظات الفرح."
-        p2.font.name = "Calibri"
-        p2.font.size = Pt(18)
-        p2.font.color.rgb = TEXT_1
-        p2.alignment = PP_ALIGN.RIGHT
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
 
-        lbl1 = slide.shapes.add_textbox(Inches(0.7), Inches(5.9), Inches(4.1), Inches(1.2))
-        lbl1.name = "!!label_1"
-        lbl1.text_frame.paragraphs[0].text = "Yellow Hibiscus"
-        lbl1.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl1.text_frame.paragraphs[0].font.size = Pt(24)
-        lbl1.text_frame.paragraphs[0].font.italic = True
-        lbl1.text_frame.paragraphs[0].font.color.rgb = ACCENT_1
-        lbl1.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl1.text_frame.add_paragraph()
-        p_ar.text = "الكركديه الأصفر"
-        p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(16)
-        p_ar.font.color.rgb = TEXT_1
-        p_ar.alignment = PP_ALIGN.CENTER
-    else:
-        sz = Inches(2.4) if state_index == 0 else Inches(1.35)
-        top_y = Inches(1.8) if state_index == 0 else Inches(2.6)
-        f1 = slide.shapes.add_picture(IMG_HIBISCUS, x[0] + (w[0] - sz)/2, top_y, sz, sz)
-        f1.name = "!!flower_1"
-
-        lbl1 = slide.shapes.add_textbox(x[0], top_y + sz + Inches(0.3), w[0], Inches(1.2))
-        lbl1.name = "!!label_1"
-        lbl1.text_frame.paragraphs[0].text = "Hibiscus"
-        lbl1.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl1.text_frame.paragraphs[0].font.size = Pt(18) if state_index == 0 else Pt(13)
-        lbl1.text_frame.paragraphs[0].font.italic = True
-        lbl1.text_frame.paragraphs[0].font.color.rgb = ACCENT_1
-        lbl1.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl1.text_frame.add_paragraph()
-        p_ar.text = "الكركديه"
-        p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(14) if state_index == 0 else Pt(11)
-        p_ar.font.color.rgb = TEXT_1
-        p_ar.alignment = PP_ALIGN.CENTER
-
-    # --- بطاقة 2 ---
-    if state_index == 2:
-        f2 = slide.shapes.add_picture(IMG_LILY, x[1] + Inches(0.4), Inches(1.2), Inches(4.7), Inches(4.7))
-        f2.name = "!!flower_2"
-
-        num2 = slide.shapes.add_textbox(x[1] + Inches(5.0), Inches(0.8), Inches(3.5), Inches(1.8))
-        num2.name = "!!num_2"
-        p = num2.text_frame.paragraphs[0]
-        p.text = "2"
+        p = tf.paragraphs[0]
+        p.text = card["num"]
         p.font.name = "Segoe UI"
-        p.font.size = Pt(110)
+        p.font.size = Pt(geo["num_size"])
         p.font.bold = True
-        p.font.color.rgb = ACCENT_2
+        p.font.color.rgb = card["accent_rgb"]
+        p.alignment = geo["num_align"]
 
-        t2 = slide.shapes.add_textbox(x[1] + Inches(4.7), Inches(2.8), Inches(4.2), Inches(3.6))
-        t2.name = "!!text_2"
-        tf = t2.text_frame
+    # 4. Title Text (English & Arabic)
+    for card in CARD_DATA:
+        cid = card["id"]
+        geo = layout[cid]
+
+        tb = slide.shapes.add_textbox(
+            Inches(geo["title_x"]),
+            Inches(geo["title_y"]),
+            Inches(geo["title_w"]),
+            Inches(1.50),
+        )
+        assign_morph_identifier(tb, f"!!title_{cid}")
+        tf = tb.text_frame
         tf.word_wrap = True
-        p1 = tf.paragraphs[0]
-        p1.text = "أيقونة الأناقة والنعومة والجمال الهادئ، وتُعبر عن المشاعر الصادقة والمودة الخالصة."
-        p1.font.name = "Calibri"
-        p1.font.size = Pt(18)
-        p1.font.color.rgb = TEXT_2
-        p1.alignment = PP_ALIGN.RIGHT
-        p1.space_after = Pt(18)
-        p2 = tf.add_paragraph()
-        p2.text = "بحضورها الملكي وعطرها الرقيق، تضفي لمسة ساحرة تلائم أرقى مناسبات التهنئة والمحبة."
-        p2.font.name = "Calibri"
-        p2.font.size = Pt(18)
-        p2.font.color.rgb = TEXT_2
-        p2.alignment = PP_ALIGN.RIGHT
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
 
-        lbl2 = slide.shapes.add_textbox(x[1] + Inches(0.7), Inches(5.9), Inches(4.1), Inches(1.2))
-        lbl2.name = "!!label_2"
-        lbl2.text_frame.paragraphs[0].text = "Pink Lily"
-        lbl2.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl2.text_frame.paragraphs[0].font.size = Pt(24)
-        lbl2.text_frame.paragraphs[0].font.italic = True
-        lbl2.text_frame.paragraphs[0].font.color.rgb = ACCENT_2
-        lbl2.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl2.text_frame.add_paragraph()
-        p_ar.text = "الزنبق الوردي"
+        # English Title
+        p_en = tf.paragraphs[0]
+        p_en.text = card["name_en"]
+        p_en.font.name = "Georgia"
+        p_en.font.size = Pt(22 if geo["is_hero"] else 15)
+        p_en.font.italic = True
+        p_en.font.bold = True
+        p_en.font.color.rgb = card["text_rgb"]
+        p_en.alignment = geo["title_align"]
+
+        # Arabic Title
+        p_ar = tf.add_paragraph()
+        p_ar.text = card["name_ar"]
         p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(16)
-        p_ar.font.color.rgb = TEXT_2
-        p_ar.alignment = PP_ALIGN.CENTER
-    else:
-        sz = Inches(2.4) if state_index == 0 else Inches(1.35)
-        top_y = Inches(1.8) if state_index == 0 else Inches(2.6)
-        f2 = slide.shapes.add_picture(IMG_LILY, x[1] + (w[1] - sz)/2, top_y, sz, sz)
-        f2.name = "!!flower_2"
+        p_ar.font.size = Pt(17 if geo["is_hero"] else 13)
+        p_ar.font.bold = True
+        p_ar.font.color.rgb = card["accent_rgb"]
+        p_ar.alignment = geo["title_align"]
+        if geo["title_align"] == PP_ALIGN.RIGHT:
+            set_paragraph_rtl(p_ar)
 
-        lbl2 = slide.shapes.add_textbox(x[1], top_y + sz + Inches(0.3), w[1], Inches(1.2))
-        lbl2.name = "!!label_2"
-        lbl2.text_frame.paragraphs[0].text = "Pink Lily"
-        lbl2.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl2.text_frame.paragraphs[0].font.size = Pt(18) if state_index == 0 else Pt(13)
-        lbl2.text_frame.paragraphs[0].font.italic = True
-        lbl2.text_frame.paragraphs[0].font.color.rgb = ACCENT_2
-        lbl2.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl2.text_frame.add_paragraph()
-        p_ar.text = "الزنبق"
-        p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(14) if state_index == 0 else Pt(11)
-        p_ar.font.color.rgb = TEXT_2
-        p_ar.alignment = PP_ALIGN.CENTER
+    # 5. Descriptive Arabic Content (Only displayed in Expanded State)
+    for card in CARD_DATA:
+        cid = card["id"]
+        geo = layout[cid]
 
-    # --- بطاقة 3 ---
-    if state_index == 3:
-        f3 = slide.shapes.add_picture(IMG_PEONY, x[2] + Inches(0.4), Inches(1.2), Inches(4.7), Inches(4.7))
-        f3.name = "!!flower_3"
+        # In collapsed state, create an off-screen/zero-opacity paired shape
+        # to ensure seamless morph interpolation into the hero state
+        if geo["is_hero"]:
+            desc_x = Inches(geo["body_x"])
+            desc_y = Inches(geo["body_y"])
+            desc_w = Inches(geo["body_w"])
+            desc_h = Inches(3.00)
+        else:
+            desc_x = Inches(geo["card_x"] + 0.10)
+            desc_y = Inches(7.60)  # Hidden just beyond canvas
+            desc_w = Inches(max(0.50, geo["card_w"] - 0.20))
+            desc_h = Inches(0.50)
 
-        num3 = slide.shapes.add_textbox(x[2] + Inches(5.0), Inches(0.8), Inches(3.5), Inches(1.8))
-        num3.name = "!!num_3"
-        p = num3.text_frame.paragraphs[0]
-        p.text = "3"
-        p.font.name = "Segoe UI"
-        p.font.size = Pt(110)
-        p.font.bold = True
-        p.font.color.rgb = ACCENT_3
-
-        t3 = slide.shapes.add_textbox(x[2] + Inches(4.7), Inches(2.8), Inches(4.2), Inches(3.6))
-        t3.name = "!!text_3"
-        tf = t3.text_frame
+        tb = slide.shapes.add_textbox(desc_x, desc_y, desc_w, desc_h)
+        assign_morph_identifier(tb, f"!!desc_{cid}")
+        tf = tb.text_frame
         tf.word_wrap = True
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+
         p1 = tf.paragraphs[0]
-        p1.text = "زهرة نادرة تجسد معاني السكينة والعمق والثقة، وتلفت الأنظار بندرتها وسحرها الفريد."
+        p1.text = card["para_1"]
         p1.font.name = "Calibri"
-        p1.font.size = Pt(18)
-        p1.font.color.rgb = TEXT_3
-        p1.alignment = PP_ALIGN.RIGHT
-        p1.space_after = Pt(18)
+        p1.font.size = Pt(13.5)
+        p1.font.color.rgb = card["text_rgb"]
+        set_paragraph_rtl(p1)
+
         p2 = tf.add_paragraph()
-        p2.text = "تأسر القلوب بتموجات بتلاتها المخملية العميقة لتعكس فخامة عصرية لا مثيل لها."
+        p2.text = card["para_2"]
         p2.font.name = "Calibri"
-        p2.font.size = Pt(18)
-        p2.font.color.rgb = TEXT_3
-        p2.alignment = PP_ALIGN.RIGHT
+        p2.font.size = Pt(13.5)
+        p2.font.color.rgb = card["text_rgb"]
+        p2.space_before = Pt(10)
+        set_paragraph_rtl(p2)
 
-        lbl3 = slide.shapes.add_textbox(x[2] + Inches(0.7), Inches(5.9), Inches(4.1), Inches(1.2))
-        lbl3.name = "!!label_3"
-        lbl3.text_frame.paragraphs[0].text = "Blue Peony"
-        lbl3.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl3.text_frame.paragraphs[0].font.size = Pt(24)
-        lbl3.text_frame.paragraphs[0].font.italic = True
-        lbl3.text_frame.paragraphs[0].font.color.rgb = ACCENT_3
-        lbl3.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl3.text_frame.add_paragraph()
-        p_ar.text = "الفاوانيا الزرقاء"
-        p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(16)
-        p_ar.font.color.rgb = TEXT_3
-        p_ar.alignment = PP_ALIGN.CENTER
-    else:
-        sz = Inches(2.4) if state_index == 0 else Inches(1.35)
-        top_y = Inches(1.8) if state_index == 0 else Inches(2.6)
-        f3 = slide.shapes.add_picture(IMG_PEONY, x[2] + (w[2] - sz)/2, top_y, sz, sz)
-        f3.name = "!!flower_3"
+# ==============================================================================
+# MAIN EXECUTION PIPELINE
+# ==============================================================================
 
-        lbl3 = slide.shapes.add_textbox(x[2], top_y + sz + Inches(0.3), w[2], Inches(1.2))
-        lbl3.name = "!!label_3"
-        lbl3.text_frame.paragraphs[0].text = "Blue Peony"
-        lbl3.text_frame.paragraphs[0].font.name = "Georgia"
-        lbl3.text_frame.paragraphs[0].font.size = Pt(18) if state_index == 0 else Pt(13)
-        lbl3.text_frame.paragraphs[0].font.italic = True
-        lbl3.text_frame.paragraphs[0].font.color.rgb = ACCENT_3
-        lbl3.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
-        p_ar = lbl3.text_frame.add_paragraph()
-        p_ar.text = "الفاوانيا"
-        p_ar.font.name = "Calibri"
-        p_ar.font.size = Pt(14) if state_index == 0 else Pt(11)
-        p_ar.font.color.rgb = TEXT_3
-        p_ar.alignment = PP_ALIGN.CENTER
+def main():
+    print("[1/4] Preparing directories and synthesizing procedural audio...")
+    generate_audio_effects()
 
-# توليد شرائح PowerPoint
-create_powerpoint_slide(0) # نظرة عامة
-create_powerpoint_slide(1) # تمدد البطاقة 1
-create_powerpoint_slide(2) # تمدد البطاقة 2
-create_powerpoint_slide(3) # تمدد البطاقة 3
-create_powerpoint_slide(0) # العودة لنظرة عامة
+    print("[2/4] Verifying and generating botanical graphics...")
+    verify_or_create_assets()
 
-pptx_out = os.path.join(OUTPUT_DIR, "reconstructed_presentation.pptx")
-prs.save(pptx_out)
-print(f"[1/2] تم حفظ عرض الباوربوينت: {pptx_out}")
+    print("[3/4] Initializing widescreen presentation canvas...")
+    prs = Presentation()
+    prs.slide_width = Inches(SLIDE_WIDTH)
+    prs.slide_height = Inches(SLIDE_HEIGHT)
+    blank_layout = prs.slide_layouts[6]  # Clean blank layout
 
-# -----------------------------------------------------------------------------
-# 5. محرك الاستيفاء الرياضي (Frame-by-Frame Linear Interpolation Engine)
-# لتوليد فيديو الحركة بدقة 60 إطاراً في الثانية (Smooth 60 FPS Video)
-# -----------------------------------------------------------------------------
-try:
-    import cv2
-    import numpy as np
+    print("[4/4] Generating accordion states with native Morph transitions...")
+    # 5 Sequential Slides:
+    # 0: State 0 (Balanced Overview)
+    # 1: State 1 (Card 1 Hero)
+    # 2: State 2 (Card 2 Hero)
+    # 3: State 3 (Card 3 Hero)
+    # 4: State 0 (Loop back to Overview)
+    slides_sequence = [0, 1, 2, 3, 0]
+    for step_num, state_id in enumerate(slides_sequence, start=1):
+        print(f"      -> Building Slide {step_num} (State {state_id})...")
+        render_slide(prs, blank_layout, state_id)
 
-    WIDTH, HEIGHT = 1920, 1080
-    FPS = 60
-    TRANSITION_FRAMES = 50   # مدة الحركة الانسيابية (~0.8 ثانية)
-    HOLD_FRAMES = 60         # مدة التوقف عند كل بطاقة (1 ثانية)
+    output_pptx = OUTPUT_DIR / "reconstructed_presentation.pptx"
+    prs.save(str(output_pptx))
+    print(f"\n[SUCCESS] Presentation generated successfully: {output_pptx}")
 
-    # دالة الاستيفاء التكعيبي لتنعيم الحركة (Smoothstep Interpolation)
-    def smoothstep(t):
-        return t * t * (3 - 2 * t)
-
-    # الحالات الرياضية لكل شريحة (x, width)
-    states = [
-        # State 0: متساوية
-        [(0, 640), (640, 640), (1280, 640)],
-        # State 1: الأولى متمددة
-        [(0, 1316), (1316, 302), (1618, 302)],
-        # State 2: الثانية متمددة
-        [(0, 302), (302, 1316), (1618, 302)],
-        # State 3: الثالثة متمددة
-        [(0, 302), (302, 302), (604, 1316)],
-        # State 4: العودة للحالة 0
-        [(0, 640), (640, 640), (1280, 640)]
-    ]
-
-    bg_colors = [
-        (227, 244, 253),  # BGR for Card 1
-        (236, 228, 252),  # BGR for Card 2
-        (246, 238, 227)   # BGR for Card 3
-    ]
-
-    video_out = os.path.join(OUTPUT_DIR, "morph_animation.mp4")
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(video_out, fourcc, FPS, (WIDTH, HEIGHT))
-
-    # تجهيز صور الورود بصيغة ألفا
-    raw_imgs = [
-        Image.open(IMG_HIBISCUS).convert("RGBA"),
-        Image.open(IMG_LILY).convert("RGBA"),
-        Image.open(IMG_PEONY).convert("RGBA")
-    ]
-
-    print("[2/2] جاري تصيير فيديو الحركة بالاستيفاء الخطي (Interpolation)...")
-
-    for s in range(len(states) - 1):
-        start_state = states[s]
-        end_state = states[s + 1]
-
-        # 1. إطارات التوقف (Hold)
-        for _ in range(HOLD_FRAMES):
-            frame = np.ones((HEIGHT, WIDTH, 3), dtype=np.uint8) * 255
-            for i in range(3):
-                x, w = start_state[i]
-                cv2.rectangle(frame, (int(x), 0), (int(x + w), HEIGHT), bg_colors[i], -1)
-            out.write(frame)
-
-        # 2. إطارات التحويل التدريجي (Morphing Frames عبر الاستيفاء)
-        for f in range(TRANSITION_FRAMES):
-            progress = (f + 1) / TRANSITION_FRAMES
-            t = smoothstep(progress)  # تطبيق الاستيفاء الرياضي
-
-            frame = np.ones((HEIGHT, WIDTH, 3), dtype=np.uint8) * 255
-            for i in range(3):
-                # معادلة الاستيفاء الخطي المطبقة:
-                # current = start + (end - start) * t
-                curr_x = start_state[i][0] + (end_state[i][0] - start_state[i][0]) * t
-                curr_w = start_state[i][1] + (end_state[i][1] - start_state[i][1]) * t
-                cv2.rectangle(frame, (int(curr_x), 0), (int(curr_x + curr_w), HEIGHT), bg_colors[i], -1)
-
-            out.write(frame)
-
-    out.release()
-    print(f"[نجاح]: تم إنشاء فيديو الحركة السلسة بنجاح: {video_out}")
-
-except ImportError:
-    print("[تنبيه]: لتوليد فيديو MP4 للحركة تلقائياً، قم بتثبيت opencv عبر: pip install opencv-python-headless")
+if __name__ == "__main__":
+    main()
